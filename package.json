@@ -1,0 +1,17 @@
+{
+  "name": "lawlens",
+  "version": "0.1.0",
+  "description": "Search state and federal US laws by keyword, read them with saved progress, and analyze them with a free AI key.",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "sanitize-html": "^2.13.1"
+  }
+}
