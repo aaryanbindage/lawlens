@@ -7,7 +7,7 @@ import { sessionMiddleware, requireUser, register, login, logout, publicUser } f
 import { searchAll, getDocument } from './sources.js';
 import { STATES } from './states.js';
 import { ensureLoaded } from './corpus.js';
-import { PROVIDERS, chat, listModels } from './ai.js';
+import { aiStatus, chat } from './ai.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -24,12 +24,13 @@ app.set('trust proxy', 'loopback');
 app.use(express.json({ limit: '2mb' }));
 app.use(sessionMiddleware);
 
-const userKeys = (req) => ({ openstates: req.get('x-openstates-key') || '', govinfo: req.get('x-govinfo-key') || '' });
+// Data-source keys come only from the server's .env; visitors never supply any.
+const userKeys = () => ({});
 
 app.get('/api/meta', (req, res) => {
   res.json({
     states: STATES,
-    providers: Object.fromEntries(Object.entries(PROVIDERS).map(([k, v]) => [k, { label: v.label, defaultModel: v.defaultModel, keyUrl: v.keyUrl }])),
+    ai: aiStatus(),
     serverKeys: { openstates: !!process.env.OPENSTATES_API_KEY, govinfo: !!process.env.GOVINFO_API_KEY },
   });
 });
@@ -62,7 +63,7 @@ app.get('/api/doc', async (req, res) => {
   } catch (err) {
     const msg =
       err.status === 429
-        ? 'This source is rate-limited right now. If it is the US Code, add a free api.data.gov key in Settings'
+        ? 'This source is busy right now (rate-limited). Please try again in a few minutes'
         : err.message;
     res.status(err.status === 404 ? 404 : 502).json({ error: msg });
   }
@@ -130,7 +131,6 @@ app.delete('/api/history', requireUser, (req, res) => {
 
 /* AI */
 app.post('/api/ai/chat', chat);
-app.get('/api/ai/models', listModels);
 
 app.use(express.static(join(ROOT, 'public'), { extensions: ['html'] }));
 app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(join(ROOT, 'public', 'index.html')));

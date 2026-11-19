@@ -21,10 +21,9 @@ const store = {
   },
 };
 
-const DEFAULT_SETTINGS = { state: '', aiEnabled: false, provider: 'gemini', model: '', theme: 'system', contextChars: 30000 };
+const DEFAULT_SETTINGS = { state: '', aiEnabled: true, theme: 'system' };
 let settings = { ...DEFAULT_SETTINGS, ...store.get('settings', {}) };
-let keys = store.get('keys', {}); // API keys never leave this browser except as request headers
-let meta = { states: [], providers: {}, serverKeys: {} };
+let meta = { states: [], ai: { enabled: false }, serverKeys: {} };
 let user = null;
 
 function saveSettings(patch) {
@@ -33,15 +32,14 @@ function saveSettings(patch) {
   applyTheme();
   if (user) api('/api/settings', { method: 'PUT', body: settings }).catch(() => {});
 }
-function saveKeys(patch) {
-  keys = { ...keys, ...patch };
-  store.set('keys', keys);
-}
 function applyTheme() {
   if (settings.theme === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.dataset.theme = settings.theme;
 }
-const aiReady = () => settings.aiEnabled && !!keys[`ai_${settings.provider}`];
+// AI runs on the site's own key; visitors only switch it on/off (and sign in, if the site requires it).
+const aiAvailable = () => meta.ai.enabled && settings.aiEnabled !== false;
+const aiNeedsSignIn = () => aiAvailable() && meta.ai.requireAccount && !user;
+const aiReady = () => aiAvailable() && !aiNeedsSignIn();
 const stateName = (code) => meta.states.find((s) => s.code === code)?.name || '';
 
 /* ---------------------------------- helpers ---------------------------------- */
@@ -51,8 +49,6 @@ async function api(path, { method = 'GET', body, headers = {} } = {}) {
     method,
     headers: {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(keys.openstates ? { 'x-openstates-key': keys.openstates } : {}),
-      ...(keys.govinfo ? { 'x-govinfo-key': keys.govinfo } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -178,8 +174,8 @@ async function removeHistory(key) {
 async function streamChat(messages, onDelta) {
   const res = await fetch('/api/ai/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-ai-key': keys[`ai_${settings.provider}`] || '' },
-    body: JSON.stringify({ provider: settings.provider, model: settings.model || meta.providers[settings.provider]?.defaultModel, messages }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -240,7 +236,7 @@ On the very last line, output exactly: SEARCH: <2 to 4 short keyword phrases sep
 }
 
 function docTextForAI(doc) {
-  const max = Number(settings.contextChars) || 30000;
+  const max = meta.ai.contextChars || 30000;
   const t = doc.text || '';
   return { value: t.slice(0, max), truncated: t.length > max };
 }
@@ -270,7 +266,11 @@ function openAuth(mode = 'login') {
   $('#authDialog').showModal();
 }
 
-$('#authSwitch').onclick = () => openAuth(authMode === 'login' ? 'register' : 'login');
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-signin]')) openAuth('login');
+  else if (e.target.closest('[data-signup]')) openAuth('register');
+});
+$('#authSwitch').onclick =() => openAuth(authMode === 'login' ? 'register' : 'login');
 $('#authCancel').onclick = () => $('#authDialog').close();
 $('#authForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -453,7 +453,7 @@ function renderResults(container, data, q) {
             <div class="meta">Gets exact citations you can look up, explained in plain English.</div></a>`),
         );
     } else if (g.error) {
-      cards.innerHTML = `<p class="notice">${esc(g.error)}${g.needsKey ? ` <a href="#/settings">Open Settings</a>` : ''}</p>`;
+      cards.innerHTML = `<p class="notice">${esc(g.error)}</p>`;
     } else if (!g.items.length) {
       cards.innerHTML = `<p class="notice">${g.note ? esc(g.note) : 'No matches here.'}</p>`;
     } else {
@@ -502,7 +502,7 @@ async function renderReader(params) {
   try {
     doc = await api(`/api/doc?src=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`);
   } catch (err) {
-    view.innerHTML = `<p class="notice">Couldn’t load this document: ${esc(err.message)}. ${err.message.includes('key') ? '<a href="#/settings">Open Settings</a>' : ''}</p>`;
+    view.innerHTML = `<p class="notice">Couldn’t load this document: ${esc(err.message)}.</p>`;
     return;
   }
   if (parseHash().params.get('id') !== id) return;
@@ -522,7 +522,7 @@ async function renderReader(params) {
           <div class="row">
             <a class="btn sm" href="${esc(doc.url)}" target="_blank" rel="noopener">Official source ↗</a>
             <button class="btn sm" type="button" id="copyCite">Copy citation</button>
-            ${showAI ? '' : `<a class="btn sm" href="#/settings">✦ Enable AI summaries</a>`}
+            ${aiNeedsSignIn() ? `<button class="btn sm" type="button" data-signin>✦ Sign in for AI summaries</button>` : ''}
             <span class="muted small" id="saveState">${user ? '' : 'Saved on this device · sign in to sync'}</span>
           </div>
           ${doc.partial ? `<p class="notice" style="margin-top:14px">The full bill text is published as a file on the legislature’s site — use the version links below to read it.</p>` : ''}
@@ -639,7 +639,7 @@ function wireLawPanel(doc) {
       });
       history.push({ role: 'assistant', content: full });
       out.classList.remove('typing');
-      if (!full) out.innerHTML = '<p class="muted">(No response — try another model in Settings.)</p>';
+      if (!full) out.innerHTML = '<p class="muted">(No response — please try again.)</p>';
     } catch (err) {
       history.pop();
       out.className = 'msg err';
@@ -674,13 +674,20 @@ function wireLawPanel(doc) {
 
 let analystThread = store.get('analystThread', []);
 
+function analystGateHTML() {
+  if (!meta.ai.enabled) return '<p class="muted">The Analyst isn’t switched on for this site yet.</p>';
+  if (aiNeedsSignIn())
+    return `<p>It’s free — sign in or create an account to use it.</p>
+      <div class="row" style="justify-content:center"><button class="btn primary" type="button" data-signup>Create account</button><button class="btn" type="button" data-signin>Sign in</button></div>`;
+  return '<p>AI features are turned off in your settings.</p><a class="btn primary" href="#/settings">Turn on in Settings</a>';
+}
+
 function renderAnalyst(params) {
   if (!aiReady()) {
     view.innerHTML = `<div class="analyst"><div class="panel empty-state">
       <h2>✦ Meet the Analyst</h2>
       <p>Describe your situation in plain words and the Analyst finds the ${settings.state ? esc(stateName(settings.state)) + ' and ' : ''}federal laws that apply, explains them, and links you to the text.</p>
-      <p>It runs on a <strong>free</strong> AI key (Google Gemini, Groq or OpenRouter). Turn it on in Settings — it takes about a minute.</p>
-      <a class="btn primary" href="#/settings">Set up AI in Settings</a>
+      ${analystGateHTML()}
     </div></div>`;
     return;
   }
@@ -872,34 +879,17 @@ async function renderReading() {
 /* ---------------------------------- Settings view ---------------------------------- */
 
 function renderSettings() {
-  const p = meta.providers;
-  const prov = settings.provider;
   view.innerHTML = `<div class="settings">
     <h2 style="font-size:26px;margin:0">Settings</h2>
 
     <section class="panel">
       <label class="switch"><span>✦ AI features (Analyst)<br><span class="hint">Summaries, chat with a law, and the Analyst tab.</span></span>
-        <input type="checkbox" id="aiEnabled" ${settings.aiEnabled ? 'checked' : ''} /></label>
-      <div id="aiFields" ${settings.aiEnabled ? '' : 'hidden'} style="margin-top:16px;display:grid;gap:12px">
-        <div class="grid2">
-          <label class="field">Provider
-            <select id="provider">${Object.entries(p).map(([k, v]) => `<option value="${k}" ${k === prov ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select>
-          </label>
-          <label class="field">Model
-            <input id="model" list="modelList" placeholder="${esc(p[prov]?.defaultModel || '')}" value="${esc(settings.model)}" />
-            <datalist id="modelList"></datalist>
-          </label>
-        </div>
-        <label class="field">API key
-          <input id="aiKey" type="password" autocomplete="off" placeholder="Paste your free key" value="${esc(keys[`ai_${prov}`] || '')}" />
-          <span class="hint">Get a free key: <a id="keyLink" href="${esc(p[prov]?.keyUrl)}" target="_blank" rel="noopener">${esc(p[prov]?.keyUrl)}</a>. Stored only in this browser; sent to the provider through this app’s server per request, never saved there.</span>
-        </label>
-        <div class="row"><button class="btn sm" type="button" id="testAI">Test connection</button><button class="btn sm ghost" type="button" id="loadModels">Load available models</button><span class="status" id="aiStatus"></span></div>
-        <label class="field">Law text sent to AI (characters)
-          <input id="contextChars" type="number" min="4000" max="400000" step="1000" value="${settings.contextChars}" />
-          <span class="hint">Gemini handles very long laws; Groq’s free tier works best around 20,000.</span>
-        </label>
-      </div>
+        <input type="checkbox" id="aiEnabled" ${settings.aiEnabled !== false ? 'checked' : ''} ${meta.ai.enabled ? '' : 'disabled'} /></label>
+      <p class="hint" style="margin:10px 0 0">${
+        meta.ai.enabled
+          ? `Provided free by this site — no API key needed. Powered by ${esc(meta.ai.provider)} (${esc(meta.ai.model)}), up to ${meta.ai.perHour} requests per hour${meta.ai.requireAccount ? ' for signed-in users' : ''}.`
+          : 'AI isn’t set up on this site yet.'
+      }</p>
     </section>
 
     <section class="panel">
@@ -909,78 +899,20 @@ function renderSettings() {
     </section>
 
     <section class="panel">
-      <h2>Law data sources</h2>
-      <p class="muted">Federal regulations and the Federal Register work without keys. These free keys unlock more.</p>
-      <div style="display:grid;gap:12px">
-        <label class="field">Open States API key ${meta.serverKeys.openstates ? '<span class="hint">(server key already configured — optional)</span>' : ''}
-          <input id="osKey" type="password" autocomplete="off" value="${esc(keys.openstates || '')}" placeholder="Enables state legislation search" />
-          <span class="hint">Free at <a href="https://openstates.org/accounts/signup/" target="_blank" rel="noopener">openstates.org</a> → profile → API key. Searches bills and enacted laws in all 50 states.</span>
-        </label>
-        <label class="field">api.data.gov key (GovInfo) ${meta.serverKeys.govinfo ? '<span class="hint">(server key already configured — optional)</span>' : ''}
-          <input id="govKey" type="password" autocomplete="off" value="${esc(keys.govinfo || '')}" placeholder="Optional — raises US Code search limits" />
-          <span class="hint">US Code and Public Law search uses a shared demo key (≈30 searches/hour). A free key from <a href="https://api.data.gov/signup/" target="_blank" rel="noopener">api.data.gov</a> raises that to 1,000/hour.</span>
-        </label>
-      </div>
-    </section>
-
-    <section class="panel">
       <h2>Appearance</h2>
       <div class="scope" style="justify-content:flex-start;margin-top:10px">${['system', 'light', 'dark'].map((t) => `<button type="button" class="chip" data-theme-opt="${t}" aria-pressed="${settings.theme === t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
     </section>
 
     <section class="panel">
       <h2>Account</h2>
-      ${user ? `<p class="muted">Signed in as <strong>${esc(user.email)}</strong>. Reading history and settings sync to your account (API keys stay on this device).</p>` : `<p class="muted">You’re using LawLens as a guest — reading history is kept in this browser only.</p><div class="row"><button class="btn primary" type="button" id="regBtn">Create account</button><button class="btn" type="button" id="loginBtn">Sign in</button></div>`}
+      ${user ? `<p class="muted">Signed in as <strong>${esc(user.email)}</strong>. Reading history and settings sync to your account.</p>` : `<p class="muted">You’re using LawLens as a guest — reading history is kept in this browser only.</p><div class="row"><button class="btn primary" type="button" id="regBtn">Create account</button><button class="btn" type="button" id="loginBtn">Sign in</button></div>`}
     </section>
   </div>`;
 
-  const status = (msg, ok) => {
-    const s = $('#aiStatus');
-    s.textContent = msg;
-    s.className = `status ${ok === true ? 'ok' : ok === false ? 'bad' : ''}`;
-  };
-
-  $('#aiEnabled').onchange = (e) => {
-    saveSettings({ aiEnabled: e.target.checked });
-    $('#aiFields').hidden = !e.target.checked;
-  };
-  $('#provider').onchange = (e) => {
-    saveSettings({ provider: e.target.value, model: '' });
-    renderSettings();
-  };
-  $('#model').onchange = (e) => saveSettings({ model: e.target.value.trim() });
-  $('#aiKey').onchange = (e) => saveKeys({ [`ai_${settings.provider}`]: e.target.value.trim() });
-  $('#contextChars').onchange = (e) => saveSettings({ contextChars: Math.max(4000, Number(e.target.value) || 30000) });
-  $('#loadModels').onclick = async () => {
-    status('Loading models…');
-    try {
-      const { models } = await api(`/api/ai/models?provider=${settings.provider}`, { headers: { 'x-ai-key': keys[`ai_${settings.provider}`] || '' } });
-      $('#modelList').innerHTML = models.map((m) => `<option value="${esc(m)}"></option>`).join('');
-      status(`${models.length} models available — click the Model box to choose.`, true);
-    } catch (err) {
-      status(err.message, false);
-    }
-  };
-  $('#testAI').onclick = async () => {
-    status('Testing…');
-    try {
-      const reply = await streamChat([{ role: 'user', content: 'Reply with exactly: LawLens connected' }], () => {});
-      status(reply ? `Connected ✓ (${settings.model || meta.providers[settings.provider].defaultModel})` : 'Connected, but the model returned nothing — try another model.', !!reply);
-    } catch (err) {
-      status(err.message, false);
-    }
-  };
+  $('#aiEnabled').onchange = (e) => saveSettings({ aiEnabled: e.target.checked });
   $('#stateSetting').onchange = (e) => {
     saveSettings({ state: e.target.value });
     syncStatePicker();
-  };
-  $('#osKey').onchange = (e) => {
-    saveKeys({ openstates: e.target.value.trim() });
-    toast('Open States key saved.');
-  };
-  $('#govKey').onchange = (e) => {
-    saveKeys({ govinfo: e.target.value.trim() });
-    toast('GovInfo key saved.');
   };
   view.querySelectorAll('[data-theme-opt]').forEach(
     (b) =>

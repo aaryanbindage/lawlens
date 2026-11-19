@@ -468,8 +468,9 @@ export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys =
   const state = findState(stateCode);
   const cite = citationGroup(userQuery, state, scope);
   const q = cite ? userQuery : legalize(userQuery);
-  const wanted = Object.entries(GROUPS).filter(([, g]) => {
+  const wanted = Object.entries(GROUPS).filter(([id, g]) => {
     if (g.level === 'state' && !state) return false;
+    if (id === 'os' && !openstatesKey(keys)) return false; // state bills need the site's Open States key
     return scope === 'all' || scope === g.level;
   });
 
@@ -486,11 +487,11 @@ export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys =
         if (err.unavailable) return { id, label, level: g.level, items: [], unavailable: true, error: `${state.name} isn’t in the Open US Law full-text corpus yet — use the official-source links below.` };
         if (err.status === 429 && (id === 'usc' || id === 'plaw')) {
           return {
-            id, label, level: g.level, items: [], needsKey: 'govinfo',
-            error: `The shared GovInfo demo key has hit its hourly limit. Add a free api.data.gov key in Settings to keep searching ${id === 'usc' ? 'the US Code until its local index is ready' : 'Public Laws'}.`,
+            id, label, level: g.level, items: [],
+            error: 'This source is busy right now (rate-limited). Please try again in a few minutes.',
           };
         }
-        return { id, label, level: g.level, items: [], error: err.message, needsKey: err.needsKey };
+        return { id, label, level: g.level, items: [], error: err.message };
       }
     }),
   );
