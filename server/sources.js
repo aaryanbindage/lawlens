@@ -1,6 +1,7 @@
 import sanitizeHtml from 'sanitize-html';
 import { findState, officialLinks } from './states.js';
-import { ensureLoaded, isLoaded, loadStatus, searchCorpus, getSection } from './corpus.js';
+import { ensureLoaded, isLoaded, loadStatus, searchCorpus, getSection, findCitation, findSectionNumber } from './corpus.js';
+import { parseCitation, linkifyReferences } from './citations.js';
 
 const UA = 'LawLens/0.1 (+https://github.com/aaryanbindage/lawlens)';
 const TIMEOUT_MS = 15000;
@@ -366,7 +367,7 @@ function docCorpus(id) {
     .split(/\n+/)
     .map((p) => p.trim())
     .filter(Boolean)
-    .map((p) => `<p>${esc(p)}</p>`)
+    .map((p) => `<p>${linkifyReferences(esc(p), s)}</p>`)
     .join('\n');
   const where = s.juris === 'federal' ? 'United States Code' : `${findState(s.juris)?.name} ${s.kind === 'Constitution' ? 'Constitution' : 'statutes'}`;
   return {
@@ -426,9 +427,47 @@ const GROUPS = {
   os: { label: 'State legislation', level: 'state', run: (q, s, k) => searchOpenStates(q, s, k) },
 };
 
+// "Cal. PEN § 1170(h)", "penal code 1170 subdivision h", "1170", "42 USC 1983", "41 CFR 102-34.305".
+function citationGroup(userQuery, state, scope) {
+  const c = parseCitation(userQuery, state?.code);
+  if (!c) return null;
+  const level = c.cfr || c.juris === 'federal' ? 'federal' : 'state';
+  if (scope !== 'all' && scope !== level) return null;
+  const group = { id: 'cite', label: 'Section lookup', level };
+
+  if (c.cfr) {
+    const { title, section } = c.cfr;
+    const part = section.split('.')[0];
+    const isSection = section.includes('.');
+    group.items = [{
+      src: 'ecfr',
+      id: `${title}|${isSection ? section : ''}|${part}`,
+      title: `Open ${isSection ? `section ${section}` : `Part ${part}`} of Title ${title}, Code of Federal Regulations`,
+      citation: isSection ? `${title} CFR § ${section}` : `${title} CFR Part ${part}`,
+      meta: 'Code of Federal Regulations (current)',
+    }];
+    return group;
+  }
+
+  const rows = c.citation ? [findCitation(c.juris, c.citation)].filter(Boolean) : findSectionNumber(c.juris, c.num);
+  group.items = rows.map((r) => ({
+    ...corpusItem(r, c.juris),
+    sub: c.sub,
+    meta: `${c.sub ? `Opens at subdivision (${c.sub}) · ` : ''}${corpusItem(r, c.juris).meta}`,
+  }));
+  if (!rows.length) {
+    const where = c.juris === 'federal' ? 'the US Code' : `${state.name} law`;
+    group.note = isLoaded(c.juris) || c.juris === 'federal'
+      ? `No section “${c.citation || c.num}” found in ${where}. Check the number, or search by keyword below.`
+      : `${state.name}’s code is still being prepared — try again in a moment.`;
+  }
+  return group;
+}
+
 export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys = {} }) {
   const state = findState(stateCode);
-  const q = legalize(userQuery);
+  const cite = citationGroup(userQuery, state, scope);
+  const q = cite ? userQuery : legalize(userQuery);
   const wanted = Object.entries(GROUPS).filter(([, g]) => {
     if (g.level === 'state' && !state) return false;
     return scope === 'all' || scope === g.level;
@@ -464,6 +503,7 @@ export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys =
       links: officialLinks(state, userQuery),
     });
   }
+  if (cite) groups.unshift(cite);
   return { q: userQuery, searchedAs: q !== userQuery ? q : null, state, groups };
 }
 

@@ -18,6 +18,8 @@ Search US laws by keyword for your state and the federal government, read them i
   | Official-source links | State code table of contents, Cornell LII state resources, a code-restricted search | none |
 
   The first time a state is searched, its statutes and constitution (7–61 MB) are downloaded from the Open US Law mirror and indexed with SQLite FTS5 in a worker thread; the page shows progress and fills in when done (≈20–40 s). The US Code (81 MB) is indexed at server start. Expect roughly 5–8× the download size on disk in `data/corpus.db` (about 700 MB for the US Code plus one large state).
+- **Search by citation or section number** — `Cal. PEN § 1170(h)`, `Penal Code 1170 subdivision (h)`, `PC 187`, `B&P 17200`, `Code of Civil Procedure 116.220`, `Tex. Fam. Code 6.001`, `765 ILCS 710/1`, `42 USC 1983`, `41 CFR 102-34.305`, or just `1170` (every code's § 1170 in your state). A subdivision opens the section scrolled to and highlighting that subdivision.
+- **Clickable cross-references** — in statute text, “subdivision (h) of Section 1170”, “Section 1203.4 of the Penal Code” or “Section 6.001, Family Code” link straight to the referenced section (only when it exists in the index).
 - **Reader** shows the full text in-app. Scroll position is saved by paragraph, so **Continue reading** reopens exactly where you stopped.
 - **Accounts** (email + password) sync reading history and settings across devices. Guests keep history in the browser; it is merged into the account on sign-up.
 - **Analyst (AI, opt-in in Settings)** — bring a free key from Google Gemini, Groq or OpenRouter:

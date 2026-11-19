@@ -198,6 +198,8 @@ a.card:hover { border-color: var(--accent); transform: translateY(-1px); }
 .doc td, .doc th { border: 1px solid var(--border); padding: 4px 8px; }
 .doc pre { white-space: pre-wrap; font: 14px/1.6 ui-monospace, Consolas, monospace; }
 .doc img { max-width: 100%; }
+.doc a.xref { text-decoration: underline dotted; text-underline-offset: 3px; }
+.doc a.xref:hover { text-decoration-style: solid; }
 .resume-flag { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; transition: outline-color 2s; }
 
 /* AI panel */

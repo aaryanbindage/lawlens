@@ -92,7 +92,10 @@ export function ensureLoaded(juris) {
       job.done++;
     }
     return true;
-  })().finally(() => jobs.delete(juris));
+  })().finally(() => {
+    jobs.delete(juris);
+    prefixCache.delete(juris);
+  });
   jobs.set(juris, job);
   return job.promise;
 }
@@ -121,21 +124,36 @@ const searchStmt = db.prepare(`
   ORDER BY bm25(sections_fts, 2.0, 6.0, 2.0, 1.0)
   LIMIT ?`);
 
+// The US Code file carries more than one annual edition of some sections, e.g. "… § 602 (2024)" and "(2026)".
+const editionless = (citation) => citation.replace(/\s*\(\d{4}\)$/, '');
+const editionYear = (citation) => Number((/\((\d{4})\)$/.exec(citation) || [])[1] || 0);
+
+// Keeps rank order but collapses editions of the same section to the newest one.
+function newestEditions(rows) {
+  const byKey = new Map();
+  for (const r of rows) {
+    const key = editionless(r.citation);
+    const prev = byKey.get(key);
+    if (!prev || editionYear(r.citation) > editionYear(prev.citation)) byKey.set(key, r);
+  }
+  return [...byKey.values()];
+}
+
 export function searchCorpus(juris, q, limit = 25) {
-  // Prefer sections containing every word; fall back to any word.
   // Exact phrase first ("security deposit"), then every word, then any word — merged in that order.
   const words = toFtsQuery(q, ' ');
   if (!words) return [];
   const tiers = [words.includes(' ') ? `"${words.replace(/"/g, '')}"` : null, toFtsQuery(q, ' AND '), toFtsQuery(q, ' OR ')];
   const seen = new Set();
-  const out = [];
+  let out = [];
   for (const fq of tiers) {
     if (!fq) continue;
-    for (const r of searchStmt.all(fq, juris, limit)) {
+    for (const r of searchStmt.all(fq, juris, limit * 2)) {
       if (seen.has(r.act_id)) continue;
       seen.add(r.act_id);
       out.push(r);
     }
+    out = newestEditions(out);
     if (out.length >= Math.min(limit, 10)) break;
   }
   return out.slice(0, limit);
@@ -143,4 +161,39 @@ export function searchCorpus(juris, q, limit = 25) {
 
 export function getSection(actId) {
   return db.prepare('SELECT * FROM sections WHERE act_id = ?').get(actId);
+}
+
+/* ------------------------------------------------ citation lookup ------------------------------------------------ */
+
+db.exec('CREATE INDEX IF NOT EXISTS sections_cite ON sections (juris, citation COLLATE NOCASE)');
+
+const CITE_COLS = 'act_id, kind, citation, heading, path, status, amended, substr(text, 1, 160) AS lead, substr(text, 1, 220) AS snip';
+
+// Exact section by full citation ("Cal. PEN § 1170"), ignoring a trailing "(2026)" edition year.
+export function findCitation(juris, citation) {
+  const rows = db
+    .prepare(`SELECT ${CITE_COLS} FROM sections WHERE juris = ? AND (citation = ? COLLATE NOCASE OR citation LIKE ?)`)
+    .all(juris, citation, `${citation} (%`);
+  return newestEditions(rows)[0] || null;
+}
+
+// Every section numbered `num` in any code of the jurisdiction: "1170" → PEN § 1170, CIV § 1170, …
+export function findSectionNumber(juris, num, limit = 30) {
+  const rows = db
+    .prepare(`SELECT ${CITE_COLS} FROM sections WHERE juris = ? AND (citation LIKE ? OR citation LIKE ? OR citation LIKE ?) LIMIT ?`)
+    .all(juris, `%§ ${num}`, `%§ ${num} (%`, `%/${num}`, limit * 2);
+  return newestEditions(rows).slice(0, limit);
+}
+
+// Citation prefixes in use, e.g. "Cal. PEN § " or "Tex. Estates Code § " — used to resolve "Penal Code 1170".
+const prefixCache = new Map();
+export function citationPrefixes(juris) {
+  if (!prefixCache.has(juris)) {
+    const rows = db
+      .prepare("SELECT DISTINCT substr(citation, 1, instr(citation, '§') + 1) AS p FROM sections WHERE juris = ? AND instr(citation, '§') > 0")
+      .all(juris);
+    if (!rows.length) return [];
+    prefixCache.set(juris, rows.map((r) => r.p));
+  }
+  return prefixCache.get(juris);
 }

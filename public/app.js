@@ -89,7 +89,8 @@ function timeAgo(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-const readHref = (src, id) => `#/read?src=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}`;
+const readHref = (src, id, sub) =>
+  `#/read?src=${encodeURIComponent(src)}&id=${encodeURIComponent(id)}${sub ? `&sub=${encodeURIComponent(sub)}` : ''}`;
 
 // Tiny, safe markdown renderer for AI output (escapes first, then formats).
 function md(src) {
@@ -359,7 +360,7 @@ async function renderSearch(params) {
       <h1>Find the law that applies to you</h1>
       <p>Search ${st ? `<strong>${esc(stateName(st))}</strong> and ` : ''}federal statutes, acts and regulations by keyword — then read them in full, with your place saved.</p>
       <form class="searchbar" id="searchForm" role="search">
-        <input id="q" name="q" type="search" placeholder="Try “car ownership”, “inheritance”, “security deposit”…" value="${esc(q)}" autocomplete="off" aria-label="Search laws" />
+        <input id="q" name="q" type="search" placeholder="Try “security deposit”, or a citation like “Penal Code 1170(h)”…" value="${esc(q)}" autocomplete="off" aria-label="Search laws" />
         <button class="btn primary" type="submit">Search</button>
       </form>
       <div class="scope" role="group" aria-label="Scope">
@@ -412,7 +413,7 @@ async function renderSearch(params) {
 }
 
 function resultCard(it) {
-  return `<a class="card" href="${readHref(it.src, it.id)}">
+  return `<a class="card" href="${readHref(it.src, it.id, it.sub)}">
     <div class="cite">${esc(it.citation)}</div>
     <div class="ttl">${esc(it.title)}</div>
     <div class="meta">${esc(it.meta)}</div>
@@ -570,8 +571,19 @@ async function renderReader(params) {
     flushHistory();
   };
 
-  // Resume at the saved paragraph (by element index, so it survives font/window size changes).
-  if (prior && prior.anchor > 0 && blocks[prior.anchor] && prior.progress < 1) {
+  // A cross-reference like "subdivision (h) of Section 1170" opens at that subdivision.
+  const sub = params.get('sub');
+  // Case matters: "(h)" is a subdivision, "(H)" a subparagraph — try the exact case first.
+  const startsWith = (s) => blocks.find((b) => b.textContent.trim().startsWith(`(${s})`));
+  const subBlock = sub && (startsWith(sub) || startsWith(sub.toLowerCase()) || startsWith(sub.toUpperCase()));
+  if (subBlock) {
+    requestAnimationFrame(() => {
+      scrollTo({ top: subBlock.getBoundingClientRect().top + scrollY - topOffset(), behavior: 'instant' });
+      subBlock.classList.add('resume-flag');
+      setTimeout(() => subBlock.classList.remove('resume-flag'), 3000);
+    });
+  } else if (prior && prior.anchor > 0 && blocks[prior.anchor] && prior.progress < 1) {
+    // Resume at the saved paragraph (by element index, so it survives font/window size changes).
     const target = blocks[prior.anchor];
     requestAnimationFrame(() => {
       scrollTo({ top: target.getBoundingClientRect().top + scrollY - topOffset(), behavior: 'instant' });
