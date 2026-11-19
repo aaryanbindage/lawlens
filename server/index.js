@@ -59,7 +59,11 @@ app.get('/api/doc', async (req, res) => {
   try {
     res.json(await getDocument(String(req.query.src), String(req.query.id), userKeys(req)));
   } catch (err) {
-    res.status(err.status === 404 ? 404 : 502).json({ error: err.message });
+    const msg =
+      err.status === 429
+        ? 'This source is rate-limited right now. If it is the US Code, add a free api.data.gov key in Settings'
+        : err.message;
+    res.status(err.status === 404 ? 404 : 502).json({ error: msg });
   }
 });
 

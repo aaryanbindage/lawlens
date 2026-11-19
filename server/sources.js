@@ -317,6 +317,21 @@ async function docOpenStates(id, keys) {
 
 /* ---------------------------- Public API ---------------------------- */
 
+// Everyday words → the terms statutes actually use, so "car ownership" doesn't match railroad "tank cars".
+const LEGAL_TERMS = {
+  car: 'motor vehicle', cars: 'motor vehicles', auto: 'motor vehicle', automobile: 'motor vehicle', truck: 'motor vehicle',
+  boss: 'employer', job: 'employment', fired: 'termination of employment', renter: 'tenant', rent: 'lease',
+  house: 'real property', home: 'residence', land: 'real property', inherit: 'inheritance', inherited: 'inheritance',
+  divorce: 'dissolution of marriage', kid: 'child', kids: 'children', gun: 'firearm', guns: 'firearms',
+  pot: 'marijuana', weed: 'marijuana', dui: 'driving under the influence', dwi: 'driving while intoxicated', cop: 'law enforcement officer',
+};
+export function legalize(q) {
+  return q
+    .split(/\s+/)
+    .map((w) => LEGAL_TERMS[w.toLowerCase()] || w)
+    .join(' ');
+}
+
 const GROUPS = {
   usc: { label: 'Federal statutes — United States Code', level: 'federal', run: (q, s, k) => searchUSCode(q, k) },
   plaw: { label: 'Federal acts — Public Laws', level: 'federal', run: (q, s, k) => searchPublicLaws(q, k) },
@@ -325,8 +340,9 @@ const GROUPS = {
   os: { label: 'State legislation', level: 'state', run: (q, s, k) => searchOpenStates(q, s, k) },
 };
 
-export async function searchAll({ q, stateCode, scope = 'all', keys = {} }) {
+export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys = {} }) {
   const state = findState(stateCode);
+  const q = legalize(userQuery);
   const wanted = Object.entries(GROUPS).filter(([, g]) => {
     if (g.level === 'state' && !state) return false;
     return scope === 'all' || scope === g.level;
@@ -341,7 +357,13 @@ export async function searchAll({ q, stateCode, scope = 'all', keys = {} }) {
         const items = await cached(cacheKey, () => g.run(q, state, keys));
         return { id, label, level: g.level, items };
       } catch (err) {
-        return { id, label, level: g.level, items: [], error: err.message, needsKey: err.needsKey || (err.status === 429 ? 'govinfo' : undefined) };
+        if (err.status === 429 && (id === 'usc' || id === 'plaw')) {
+          return {
+            id, label, level: g.level, items: [], needsKey: 'govinfo',
+            error: 'The shared GovInfo demo key has hit its hourly limit. Add a free api.data.gov key in Settings to keep searching the US Code.',
+          };
+        }
+        return { id, label, level: g.level, items: [], error: err.message, needsKey: err.needsKey };
       }
     }),
   );
@@ -351,10 +373,10 @@ export async function searchAll({ q, stateCode, scope = 'all', keys = {} }) {
       id: 'links',
       label: `${state.name} statutes — official sources`,
       level: 'state',
-      links: officialLinks(state, q),
+      links: officialLinks(state, userQuery),
     });
   }
-  return { q, state, groups };
+  return { q: userQuery, searchedAs: q !== userQuery ? q : null, state, groups };
 }
 
 export async function getDocument(src, id, keys = {}) {

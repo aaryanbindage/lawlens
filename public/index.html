@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LawLens — find and read US laws</title>
+  <meta name="description" content="Search state and federal US laws by keyword, read them with saved progress, and analyze them with AI." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='14' cy='14' r='9' fill='none' stroke='%232f5bd3' stroke-width='3'/><path d='M21 21l7 7' stroke='%232f5bd3' stroke-width='3.5' stroke-linecap='round'/><path d='M10 14h8M14 10v8' stroke='%232f5bd3' stroke-width='2'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/search" aria-label="LawLens home">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="14" cy="14" r="9" fill="none" stroke="currentColor" stroke-width="3"/><path d="M21 21l7 7" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/><path d="M10 14h8M14 10v8" stroke="currentColor" stroke-width="2"/></svg>
+      <span>LawLens</span>
+    </a>
+    <label class="state-pick">
+      <span class="sr-only">Your state</span>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>
+      <select id="stateSelect"><option value="">Select your state</option></select>
+    </label>
+    <nav class="tabs" id="tabs">
+      <a href="#/search" data-tab="search">Search</a>
+      <a href="#/analyst" data-tab="analyst">Analyst</a>
+      <a href="#/reading" data-tab="reading">Continue reading</a>
+      <a href="#/settings" data-tab="settings">Settings</a>
+    </nav>
+    <button class="account-btn" id="accountBtn" type="button">Sign in</button>
+  </header>
+
+  <main id="view" tabindex="-1"></main>
+
+  <dialog id="authDialog" class="dialog">
+    <form method="dialog" id="authForm">
+      <h2 id="authTitle">Sign in</h2>
+      <p class="muted" id="authSub">Sync your reading history across devices.</p>
+      <label class="field" id="nameField" hidden>Name <input name="name" autocomplete="name" /></label>
+      <label class="field">Email <input name="email" type="email" required autocomplete="email" /></label>
+      <label class="field">Password <input name="password" type="password" required minlength="8" autocomplete="current-password" /></label>
+      <p class="error" id="authError" hidden></p>
+      <div class="row">
+        <button class="btn primary" type="submit" id="authSubmit">Sign in</button>
+        <button class="btn ghost" type="button" id="authCancel">Cancel</button>
+      </div>
+      <p class="muted small">
+        <span id="authSwitchText">No account?</span>
+        <button class="link" type="button" id="authSwitch">Create one</button>
+      </p>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
