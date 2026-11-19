@@ -5,8 +5,9 @@
   "main": "server/index.js",
   "type": "module",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "test:smoke": "bash test/api-smoke.sh"
   },
   "engines": {
     "node": ">=22.13"
@@ -16,6 +17,10 @@
     "express": "^4.21.2",
     "hyparquet": "^1.33.1",
     "hyparquet-compressors": "^1.1.3",
+    "mongodb": "^6.22.0",
     "sanitize-html": "^2.13.1"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.4.3"
   }
 }

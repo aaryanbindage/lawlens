@@ -27,7 +27,21 @@ Search US laws by keyword for your state and the federal government, read them i
   - *Analyst tab*: describe your situation ("my friend says I haven't inherited this money, I think I did") and get relevant state + federal citations explained, plus one-click searches of the official databases.
   - To protect the shared free quota, AI requires sign-in by default (`AI_REQUIRE_ACCOUNT`) and each user (or IP) is capped per hour (`AI_REQUESTS_PER_HOUR`, default 30). Failed calls don't count, and provider errors are logged on the server rather than shown to users.
 
-## Run it
+## Deploy (free): Hugging Face Spaces + MongoDB Atlas
+
+Nothing runs on your own computer: the app runs in a free Hugging Face Docker Space, and accounts live in a free MongoDB Atlas cluster. The law search index is only a cache, so the Space's temporary disk is fine; it rebuilds itself after a restart.
+
+1. **MongoDB Atlas.** Create a free **M0** cluster at [mongodb.com/atlas](https://www.mongodb.com/cloud/atlas/register). Add a database user, then under *Network Access* allow `0.0.0.0/0`, because Space IPs change. Copy the `mongodb+srv://…` connection string.
+2. **Hugging Face Space.** At [huggingface.co/new-space](https://huggingface.co/new-space) choose **Docker → Blank**, free CPU. In the Space's *Settings → Variables and secrets*, add these **secrets**:
+   - `MONGODB_URI`: the Atlas connection string
+   - `AI_API_KEY`: your free Gemini key (plus `AI_PROVIDER` if not Gemini)
+   - optional: `OPENSTATES_API_KEY`, `GOVINFO_API_KEY`
+3. **Auto-deploy from GitHub.** In this GitHub repo's *Settings → Secrets and variables → Actions*, add the secret `HF_TOKEN` (a Hugging Face token with *write* access) and the variable `HF_SPACE` = `<your-hf-username>/<space-name>`. Every push to `master` then deploys (`.github/workflows/deploy-huggingface.yml`). Use *Actions → Deploy to Hugging Face Space → Run workflow* for the first deploy.
+4. Share the direct app URL, `https://<user>-<space>.hf.space`.
+
+Free Spaces sleep after 48 hours without visitors and wake on the next visit. The first search afterwards rebuilds the index for that state (about 20–60 s). The `Dockerfile` also works on any other Docker host.
+
+## Run locally
 
 Requires Node.js 22.13+ (uses the built-in `node:sqlite`).
 
@@ -37,7 +51,7 @@ cp .env.example .env   # then set AI_API_KEY (and optionally OPENSTATES_API_KEY 
 npm start              # http://localhost:3000
 ```
 
-Accounts, sessions and reading history are stored in `data/lawlens.db` (SQLite) and the law index in `data/corpus.db`, both on the machine running the server and never in git. When deploying, put `data/` on a persistent disk. Set `DB_PATH` or `PORT` to change locations.
+Accounts, sessions and reading history go to **MongoDB** when `MONGODB_URI` is set, and otherwise to a local SQLite file, `data/lawlens.db`, which is handy for development. The law search index is always a local cache in `data/corpus.db`. Neither is ever committed to git. `test/api-smoke.sh [url]` checks sign-up, login, settings and reading history against a running server.
 
 ### AI setup
 
@@ -51,4 +65,4 @@ Laws themselves are public domain (*Georgia v. Public.Resource.Org*, 2020). The 
 
 ## Stack
 
-Express + `node:sqlite` backend (`server/`), dependency-free vanilla JS front end (`public/`). Passwords are hashed with scrypt; sessions are HttpOnly cookies.
+Express backend (`server/`) with MongoDB or SQLite for accounts and SQLite FTS5 for the law index, plus a dependency-free vanilla JS front end (`public/`). Passwords are hashed with scrypt; sessions are HttpOnly cookies.
