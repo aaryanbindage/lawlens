@@ -435,7 +435,13 @@ function renderResults(container, data, q) {
       <div class="cards"></div>
     </section>`);
     const cards = $('.cards', sec);
-    if (g.links) {
+    if (g.loading) {
+      const pct = Math.round((g.loading.progress || 0) * 100);
+      cards.innerHTML = `<div class="notice">
+        <strong>Preparing the full text of this code for search (first time only).</strong> ${esc(g.loading.message || '')}
+        <div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="small" style="margin-top:6px">Results will appear here automatically.</div></div>`;
+    } else if (g.links) {
       cards.innerHTML = g.links
         .map((l) => `<a class="card ext" href="${esc(l.url)}" target="_blank" rel="noopener"><div class="ttl">${esc(l.title)}</div><div class="meta">${esc(l.note)}</div></a>`)
         .join('');
@@ -448,8 +454,9 @@ function renderResults(container, data, q) {
     } else if (g.error) {
       cards.innerHTML = `<p class="notice">${esc(g.error)}${g.needsKey ? ` <a href="#/settings">Open Settings</a>` : ''}</p>`;
     } else if (!g.items.length) {
-      cards.innerHTML = `<p class="notice">No matches here.</p>`;
+      cards.innerHTML = `<p class="notice">${g.note ? esc(g.note) : 'No matches here.'}</p>`;
     } else {
+      if (g.note) sec.insertBefore(h(`<p class="notice" style="margin-bottom:10px">${esc(g.note)}</p>`), cards);
       const first = g.items.slice(0, 5);
       cards.innerHTML = first.map(resultCard).join('');
       if (g.items.length > 5) {
@@ -462,6 +469,23 @@ function renderResults(container, data, q) {
       }
     }
     container.append(sec);
+  }
+
+  // Re-run the search while a code is still being indexed for the first time.
+  if (data.groups.some((g) => g.loading)) {
+    const timer = setTimeout(async () => {
+      const { name, params } = parseHash();
+      if (name !== 'search' || params.get('q') !== q) return;
+      try {
+        const fresh = await api(`/api/search?q=${encodeURIComponent(q)}&state=${encodeURIComponent(settings.state)}&scope=${params.get('scope') || 'all'}`);
+        if (parseHash().params.get('q') === q) renderResults(container, fresh, q);
+      } catch {}
+    }, 3000);
+    const prev = cleanup;
+    cleanup = () => {
+      clearTimeout(timer);
+      prev();
+    };
   }
 }
 

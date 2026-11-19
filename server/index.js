@@ -6,6 +6,7 @@ import { db } from './db.js';
 import { sessionMiddleware, requireUser, register, login, logout, publicUser } from './auth.js';
 import { searchAll, getDocument } from './sources.js';
 import { STATES } from './states.js';
+import { ensureLoaded } from './corpus.js';
 import { PROVIDERS, chat, listModels } from './ai.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -135,4 +136,10 @@ app.use(express.static(join(ROOT, 'public'), { extensions: ['html'] }));
 app.get(/^\/(?!api\/).*/, (req, res) => res.sendFile(join(ROOT, 'public', 'index.html')));
 
 const PORT = Number(process.env.PORT) || 3000;
-app.listen(PORT, () => console.log(`LawLens running at http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`LawLens running at http://localhost:${PORT}`);
+  // Build the US Code index in the background so federal search doesn't depend on GovInfo's demo key.
+  ensureLoaded('federal')
+    .then((ok) => ok && console.log('[corpus] US Code index ready'))
+    .catch((err) => console.error('[corpus] federal:', err.message));
+});

@@ -1,5 +1,6 @@
 import sanitizeHtml from 'sanitize-html';
 import { findState, officialLinks } from './states.js';
+import { ensureLoaded, isLoaded, loadStatus, searchCorpus, getSection } from './corpus.js';
 
 const UA = 'LawLens/0.1 (+https://github.com/aaryanbindage/lawlens)';
 const TIMEOUT_MS = 15000;
@@ -315,6 +316,70 @@ async function docOpenStates(id, keys) {
   };
 }
 
+/* ---------------------------- Open US Law corpus (state codes, constitutions, US Code) ---------------------------- */
+
+const CORPUS_CREDIT = 'Open US Law';
+
+// Some codes (CA, IL…) only label sections "Section 4161"; use the opening words of the text instead.
+function sectionTitle(heading, text) {
+  if (heading && !/^(§|sec(tion)?\.?)\s*[\w.:-]+\.?$/i.test(heading.trim())) return heading;
+  // Strip leading "(a)", "(765 ILCS 710/1.2)", "(from Ch. 80, par. 101)" and "Sec. 1.2." before taking the first sentence.
+  const lead = String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^\s*(\([^)]{1,60}\)\s*)+/, '')
+    .replace(/^(§|sec(tion)?\.?)\s*[\w.:-]*\w\.\s*/i, '')
+    .trim();
+  const sentence = lead.split(/(?<=\.)\s/)[0];
+  return sentence.length > 110 ? `${sentence.slice(0, 107).replace(/\s\S*$/, '')}…` : sentence || heading;
+}
+
+function corpusItem(r, juris) {
+  const where = juris === 'federal' ? 'United States Code' : `${findState(juris)?.name} ${r.kind === 'Constitution' ? 'Constitution' : 'statutes'}`;
+  return {
+    src: 'oul',
+    id: r.act_id,
+    title: sectionTitle(r.heading, r.lead) || r.citation,
+    citation: r.citation,
+    meta: [where, r.path, r.amended ? `amended ${r.amended}` : ''].filter(Boolean).join(' · '),
+    snippet: r.snip,
+  };
+}
+
+// Returns items, or throws { loading } while the jurisdiction is being downloaded and indexed for the first time.
+async function searchCorpusGroup(juris, q) {
+  if (!isLoaded(juris)) {
+    const pending = ensureLoaded(juris);
+    pending.catch((err) => console.error(`[corpus] ${juris}:`, err.message));
+    // Small jurisdictions often finish within a few seconds — wait briefly before reporting progress.
+    const done = await Promise.race([pending.catch(() => false), new Promise((r) => setTimeout(() => r('wait'), 4000))]);
+    if (done === false) throw Object.assign(new Error('No full-text code is available for this jurisdiction yet.'), { unavailable: true });
+    if (done === 'wait') throw Object.assign(new Error('loading'), { loading: loadStatus(juris) });
+  }
+  return searchCorpus(juris, q).map((r) => corpusItem(r, juris));
+}
+
+function docCorpus(id) {
+  const s = getSection(id);
+  if (!s) throw Object.assign(new Error('Section not found in the local index'), { status: 404 });
+  const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+  const body = s.text
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => `<p>${esc(p)}</p>`)
+    .join('\n');
+  const where = s.juris === 'federal' ? 'United States Code' : `${findState(s.juris)?.name} ${s.kind === 'Constitution' ? 'Constitution' : 'statutes'}`;
+  return {
+    src: 'oul',
+    id,
+    title: sectionTitle(s.heading, s.text) || s.citation,
+    citation: s.citation,
+    meta: [where, s.path, s.amended ? `last amended ${s.amended}` : ''].filter(Boolean).join(' · '),
+    url: s.source_url,
+    html: `${body}<p class="notice">Text from the <a href="https://github.com/Vaquill-AI/open-us-law" target="_blank" rel="noopener">${CORPUS_CREDIT}</a> corpus (CC BY-NC 4.0), compiled from the official publisher linked above. Check the official source for the most current version.</p>`,
+  };
+}
+
 /* ---------------------------- Public API ---------------------------- */
 
 // Everyday words → the terms statutes actually use, so "car ownership" doesn't match railroad "tank cars".
@@ -333,7 +398,28 @@ export function legalize(q) {
 }
 
 const GROUPS = {
-  usc: { label: 'Federal statutes — United States Code', level: 'federal', run: (q, s, k) => searchUSCode(q, k) },
+  code: {
+    label: 'statutes & constitution — full text',
+    level: 'state',
+    live: true,
+    run: async (q, s) => {
+      const items = await searchCorpusGroup(s.code.toLowerCase(), q);
+      // A few states only have their constitution in the corpus so far.
+      if (isLoaded(s.code.toLowerCase())) return items;
+      return { items, note: `${s.name}’s statutes aren’t in the Open US Law corpus yet, so only its constitution is searched here — use the official-source links below for the code.` };
+    },
+  },
+  usc: {
+    label: 'Federal statutes — United States Code',
+    level: 'federal',
+    live: true,
+    // Local full-text index once it's built; GovInfo (rate-limited demo key) while the first download runs.
+    run: async (q, s, k) => {
+      if (isLoaded('federal')) return searchCorpusGroup('federal', q);
+      ensureLoaded('federal').catch((err) => console.error('[corpus] federal:', err.message));
+      return searchUSCode(q, k);
+    },
+  },
   plaw: { label: 'Federal acts — Public Laws', level: 'federal', run: (q, s, k) => searchPublicLaws(q, k) },
   ecfr: { label: 'Federal regulations — Code of Federal Regulations', level: 'federal', run: (q) => searchECFR(q) },
   fr: { label: 'Federal rules — Federal Register', level: 'federal', run: (q) => searchFR(q) },
@@ -350,17 +436,19 @@ export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys =
 
   const groups = await Promise.all(
     wanted.map(async ([id, g]) => {
-      const label = g.level === 'state' ? `${state.name} legislation — Open States` : g.label;
+      const label = id === 'os' ? `${state.name} legislation — Open States` : id === 'code' ? `${state.name} ${g.label}` : g.label;
       // Keys are part of the cache key so a user adding a key isn't served a cached "needs key" error.
       const cacheKey = `${id}|${q}|${state?.code}|${id === 'os' ? openstatesKey(keys) : ''}`;
       try {
-        const items = await cached(cacheKey, () => g.run(q, state, keys));
-        return { id, label, level: g.level, items };
+        const out = await (g.live ? g.run(q, state, keys) : cached(cacheKey, () => g.run(q, state, keys)));
+        return Array.isArray(out) ? { id, label, level: g.level, items: out } : { id, label, level: g.level, ...out };
       } catch (err) {
+        if (err.loading) return { id, label, level: g.level, loading: err.loading };
+        if (err.unavailable) return { id, label, level: g.level, items: [], unavailable: true, error: `${state.name} isn’t in the Open US Law full-text corpus yet — use the official-source links below.` };
         if (err.status === 429 && (id === 'usc' || id === 'plaw')) {
           return {
             id, label, level: g.level, items: [], needsKey: 'govinfo',
-            error: 'The shared GovInfo demo key has hit its hourly limit. Add a free api.data.gov key in Settings to keep searching the US Code.',
+            error: `The shared GovInfo demo key has hit its hourly limit. Add a free api.data.gov key in Settings to keep searching ${id === 'usc' ? 'the US Code until its local index is ready' : 'Public Laws'}.`,
           };
         }
         return { id, label, level: g.level, items: [], error: err.message, needsKey: err.needsKey };
@@ -369,7 +457,7 @@ export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys =
   );
 
   if (state && scope !== 'federal') {
-    groups.unshift({
+    groups.splice(1, 0, {
       id: 'links',
       label: `${state.name} statutes — official sources`,
       level: 'state',
@@ -380,6 +468,11 @@ export async function searchAll({ q: userQuery, stateCode, scope = 'all', keys =
 }
 
 export async function getDocument(src, id, keys = {}) {
+  if (src === 'oul') {
+    const doc = docCorpus(id);
+    doc.text = htmlToText(doc.html);
+    return doc;
+  }
   const key = `doc|${src}|${id}|${src === 'os' ? openstatesKey(keys) : ''}`;
   return cached(key, async () => {
     let doc;
