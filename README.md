@@ -10,7 +10,8 @@ Search US laws by keyword for your state and the federal government, read them i
 - **Results grouped by source**, all from official/free data:
   | Source | What | Server key (`.env`) |
   |---|---|---|
-  | [Open US Law](https://github.com/Vaquill-AI/open-us-law) | **Full text of state statutes and constitutions** (46 jurisdictions; not yet AR, CO, GA, MS, TN statutes) and the **US Code** — searched locally | none |
+  | [Open US Law](https://github.com/Vaquill-AI/open-us-law) | **Full text of state statutes and constitutions** (not yet AR, GA, MS, TN statutes) and the **US Code** — searched locally | none |
+  | [Colorado OLLS](https://content.leg.colorado.gov/agencies/office-legislative-legal-services/colorado-revised-statutes) | **Colorado Revised Statutes and Constitution**, which Open US Law lacks, built from the official title downloads (`scripts/colorado.mjs`; history notes and case annotations are left out, and a few sections the state publishes only as PDF are missing) | none |
   | [eCFR](https://www.ecfr.gov/developers/documentation/api/v1) | Federal regulations (Code of Federal Regulations) | none |
   | [Federal Register](https://www.federalregister.gov/developers/documentation/api/v1) | Federal final rules | none |
   | [GovInfo](https://api.govinfo.gov/docs/) | Public Laws (Acts of Congress); US Code fallback until the local index is built | optional `GOVINFO_API_KEY` ([free](https://api.data.gov/signup/)); shared `DEMO_KEY` otherwise |

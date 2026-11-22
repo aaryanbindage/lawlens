@@ -50,6 +50,12 @@ function open(juris, create = false) {
   return h;
 }
 
+// Writable handle on a jurisdiction's database (with the schema), for builders other than the parquet worker.
+export const openForWrite = (juris) => open(juris, true).db;
+
+// Per-jurisdiction notes such as a non-Open-US-Law source credit ("credit", "credit_url").
+export const corpusMeta = (juris, key) => open(juris)?.stmt('SELECT value FROM meta WHERE key = ?').get(key)?.value ?? null;
+
 export function closeJuris(juris) {
   handles.get(juris)?.db.close();
   handles.delete(juris);

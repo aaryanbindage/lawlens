@@ -1,6 +1,6 @@
 import sanitizeHtml from 'sanitize-html';
 import { findState, officialLinks } from './states.js';
-import { ensureLoaded, isLoaded, loadStatus, searchCorpus, getSection, findCitation, findSectionNumber } from './corpus.js';
+import { ensureLoaded, isLoaded, loadStatus, searchCorpus, getSection, findCitation, findSectionNumber, corpusMeta } from './corpus.js';
 import { parseCitation, linkifyReferences } from './citations.js';
 
 const UA = 'LawLens/0.1 (+https://github.com/aaryanbindage/lawlens)';
@@ -359,6 +359,12 @@ async function searchCorpusGroup(juris, q) {
   return searchCorpus(juris, q).map((r) => corpusItem(r, juris));
 }
 
+function creditNotice(juris) {
+  const credit = corpusMeta(juris, 'credit');
+  if (credit) return `Text from the <a href="${corpusMeta(juris, 'credit_url')}" target="_blank" rel="noopener">${credit}</a> (official publisher; history notes and annotations omitted).`;
+  return `Text from the <a href="https://github.com/Vaquill-AI/open-us-law" target="_blank" rel="noopener">${CORPUS_CREDIT}</a> corpus (CC BY-NC 4.0), compiled from the official publisher linked above.`;
+}
+
 function docCorpus(id) {
   const s = getSection(id);
   if (!s) throw Object.assign(new Error('Section not found in the local index'), { status: 404 });
@@ -377,7 +383,7 @@ function docCorpus(id) {
     citation: s.citation,
     meta: [where, s.path, s.amended ? `last amended ${s.amended}` : ''].filter(Boolean).join(' · '),
     url: s.source_url,
-    html: `${body}<p class="notice">Text from the <a href="https://github.com/Vaquill-AI/open-us-law" target="_blank" rel="noopener">${CORPUS_CREDIT}</a> corpus (CC BY-NC 4.0), compiled from the official publisher linked above. Check the official source for the most current version.</p>`,
+    html: `${body}<p class="notice">${creditNotice(s.juris)} Check the official source for the most current version.</p>`,
   };
 }
 

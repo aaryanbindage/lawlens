@@ -77,6 +77,9 @@ export function parseCitation(q, stateCode) {
 
   const juris = stateCode?.toLowerCase();
   if (!juris) return null;
+  // Colorado: "C.R.S. 42-4-1301(1)(a)", "Colo. Rev. Stat. § 18-3-106", or just "42-4-1301".
+  if (juris === 'co' && (m = /^(?:c\.?\s*r\.?\s*s\.?|colo(?:rado)?\.?\s*rev(?:ised)?\.?\s*stat(?:utes?)?\.?)?\s*§*\s*(\d+(?:\.\d+)?-\d+(?:\.\d+)?-\d+(?:\.\d+)?)\s*((?:\(\s*[a-z0-9]+\s*\))*)\s*$/i.exec(text)))
+    return { juris, citation: `Colo. Rev. Stat. § ${m[1]}`, sub: firstParen(m[2]) };
   // Full citation exactly as published, e.g. "765 ILCS 710/1.2".
   if (/\d/.test(text) && findCitation(juris, text)) return { juris, citation: text, sub: null };
 

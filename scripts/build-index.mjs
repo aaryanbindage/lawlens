@@ -19,9 +19,14 @@ mkdirSync(work, { recursive: true });
 // corpus.js reads these at import time: index straight from the parquet files into the work directory.
 process.env.INDEX_URL = '';
 process.env.CORPUS_DIR = work;
-const { corpusJurisdictions, ensureLoaded, closeJuris, jurisFile } = await import('../server/corpus.js');
+const { corpusJurisdictions, ensureLoaded, closeJuris, jurisFile, openForWrite } = await import('../server/corpus.js');
+const { buildColorado } = await import('./colorado.mjs');
 
-const { version, juris: all } = await corpusJurisdictions();
+// Jurisdictions missing from Open US Law, built from their official publisher instead.
+const OWN_SOURCES = { co: (j) => buildColorado(openForWrite(j)) };
+
+const { version, juris: oul } = await corpusJurisdictions();
+const all = [...new Set([...oul, ...Object.keys(OWN_SOURCES)])].sort();
 const list = only.length ? only : all;
 // Rebuilding a few jurisdictions keeps the others listed in an existing index.json of the same snapshot.
 const prev = existsSync(join(out, 'index.json')) ? JSON.parse(readFileSync(join(out, 'index.json'), 'utf8')) : null;
@@ -42,7 +47,8 @@ for (const j of list) {
 
 async function build(j) {
   const t0 = Date.now();
-  if (!(await ensureLoaded(j))) {
+  rmSync(jurisFile(j), { force: true });
+  if (!(await (OWN_SOURCES[j] ? OWN_SOURCES[j](j) : ensureLoaded(j)))) {
     console.log(`${j}: no data in ${version}, skipped`);
     return;
   }
