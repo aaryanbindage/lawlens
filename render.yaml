@@ -1,0 +1,26 @@
+# Render Blueprint: New → Blueprint → pick this repo. Free web service, auto-deploys on every push to master.
+# Secrets marked sync: false are asked for once in the Render dashboard.
+services:
+  - type: web
+    name: lawlens
+    runtime: node
+    plan: free
+    branch: master
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/meta
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: MONGODB_URI
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: GOVINFO_API_KEY
+        sync: false
+      - key: OPENSTATES_API_KEY
+        sync: false

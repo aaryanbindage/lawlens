@@ -17,7 +17,7 @@ Search US laws by keyword for your state and the federal government, read them i
   | [Open States](https://docs.openstates.org/api-v3/) | State bills and enacted session laws | `OPENSTATES_API_KEY` ([free](https://openstates.org/accounts/signup/)); this source is hidden without it |
   | Official-source links | State code table of contents, Cornell LII state resources, a code-restricted search | none |
 
-  The first time a state is searched, its statutes and constitution (7–61 MB) are downloaded from the Open US Law mirror and indexed with SQLite FTS5 in a worker thread; the page shows progress and fills in when done (≈20–40 s). The US Code (81 MB) is indexed at server start. Expect roughly 5–8× the download size on disk in `data/corpus.db` (about 700 MB for the US Code plus one large state).
+  Each jurisdiction has its own SQLite FTS5 search index. A GitHub Actions workflow (`.github/workflows/build-index.yml`) builds them from the Open US Law snapshot and publishes them as the [`index` release](../../releases/tag/index), so the server only downloads a ready-made file: the US Code and California at startup, any other state the first time it's searched (a few seconds to a minute; the page shows progress). If no prebuilt index is available, the server indexes the parquet files itself in a worker thread instead.
 - **Search by citation or section number** — `Cal. PEN § 1170(h)`, `Penal Code 1170 subdivision (h)`, `PC 187`, `B&P 17200`, `Code of Civil Procedure 116.220`, `Tex. Fam. Code 6.001`, `765 ILCS 710/1`, `42 USC 1983`, `41 CFR 102-34.305`, or just `1170` (every code's § 1170 in your state). A subdivision opens the section scrolled to and highlighting that subdivision.
 - **Clickable cross-references** — in statute text, “subdivision (h) of Section 1170”, “Section 1203.4 of the Penal Code” or “Section 6.001, Family Code” link straight to the referenced section (only when it exists in the index).
 - **Reader** shows the full text in-app. Scroll position is saved by paragraph, so **Continue reading** reopens exactly where you stopped.
@@ -27,19 +27,19 @@ Search US laws by keyword for your state and the federal government, read them i
   - *Analyst tab*: describe your situation ("my friend says I haven't inherited this money, I think I did") and get relevant state + federal citations explained, plus one-click searches of the official databases.
   - To protect the shared free quota, AI requires sign-in by default (`AI_REQUIRE_ACCOUNT`) and each user (or IP) is capped per hour (`AI_REQUESTS_PER_HOUR`, default 30). Failed calls don't count, and provider errors are logged on the server rather than shown to users.
 
-## Deploy (free): Hugging Face Spaces + MongoDB Atlas
+## Deploy (free): Render + MongoDB Atlas
 
-Nothing runs on your own computer: the app runs in a free Hugging Face Docker Space, and accounts live in a free MongoDB Atlas cluster. The law search index is only a cache, so the Space's temporary disk is fine; it rebuilds itself after a restart.
+Nothing runs on your own computer: the app runs on a free Render web service, accounts live in a free MongoDB Atlas cluster, and the law search index is downloaded from this repo's GitHub release.
 
-1. **MongoDB Atlas.** Create a free **M0** cluster at [mongodb.com/atlas](https://www.mongodb.com/cloud/atlas/register). Add a database user, then under *Network Access* allow `0.0.0.0/0`, because Space IPs change. Copy the `mongodb+srv://…` connection string.
-2. **Hugging Face Space.** At [huggingface.co/new-space](https://huggingface.co/new-space) choose **Docker → Blank**, free CPU. In the Space's *Settings → Variables and secrets*, add these **secrets**:
+1. **Build the search index (once).** In this repo go to *Actions → Build law search index → Run workflow*. It takes about an hour for all states and publishes the `index` release; afterwards it re-runs weekly and only rebuilds when Open US Law publishes a new snapshot.
+2. **MongoDB Atlas.** Create a free **M0** cluster at [mongodb.com/atlas](https://www.mongodb.com/cloud/atlas/register). Add a database user, then under *Network Access* allow `0.0.0.0/0`, because Render's IPs change. Copy the `mongodb+srv://…` connection string.
+3. **Render.** At [dashboard.render.com](https://dashboard.render.com) choose *New → Blueprint*, connect this GitHub repo, and Render reads `render.yaml`. When asked, fill in:
    - `MONGODB_URI`: the Atlas connection string
    - `AI_API_KEY`: your free Gemini key (plus `AI_PROVIDER` if not Gemini)
-   - optional: `OPENSTATES_API_KEY`, `GOVINFO_API_KEY`
-3. **Auto-deploy from GitHub.** In this GitHub repo's *Settings → Secrets and variables → Actions*, add the secret `HF_TOKEN` (a Hugging Face token with *write* access) and the variable `HF_SPACE` = `<your-hf-username>/<space-name>`. Every push to `master` then deploys (`.github/workflows/deploy-huggingface.yml`). Use *Actions → Deploy to Hugging Face Space → Run workflow* for the first deploy.
-4. Share the direct app URL, `https://<user>-<space>.hf.space`.
+   - optional: `OPENSTATES_API_KEY`, `GOVINFO_API_KEY` (leave blank to skip)
+4. Share the URL Render gives you, `https://<name>.onrender.com`. Every push to `master` redeploys automatically.
 
-Free Spaces sleep after 48 hours without visitors and wake on the next visit. The first search afterwards rebuilds the index for that state (about 20–60 s). The `Dockerfile` also works on any other Docker host.
+Free Render services sleep after 15 minutes without visitors. The next visit wakes the service in about a minute, and the US Code and California indexes are downloaded again in the background (other states on their first search). The `Dockerfile` also works on any Docker host.
 
 ## Run locally
 
@@ -51,7 +51,7 @@ cp .env.example .env   # then set AI_API_KEY (and optionally OPENSTATES_API_KEY 
 npm start              # http://localhost:3000
 ```
 
-Accounts, sessions and reading history go to **MongoDB** when `MONGODB_URI` is set, and otherwise to a local SQLite file, `data/lawlens.db`, which is handy for development. The law search index is always a local cache in `data/corpus.db`. Neither is ever committed to git. `test/api-smoke.sh [url]` checks sign-up, login, settings and reading history against a running server.
+Accounts, sessions and reading history go to **MongoDB** when `MONGODB_URI` is set, and otherwise to a local SQLite file, `data/lawlens.db`, which is handy for development. The law search index is a local cache in `data/index/` (one file per jurisdiction). Neither is ever committed to git. `test/api-smoke.sh [url]` checks sign-up, login, settings and reading history against a running server.
 
 ### AI setup
 
@@ -65,4 +65,4 @@ Laws themselves are public domain (*Georgia v. Public.Resource.Org*, 2020). The 
 
 ## Stack
 
-Express backend (`server/`) with MongoDB or SQLite for accounts and SQLite FTS5 for the law index, plus a dependency-free vanilla JS front end (`public/`). Passwords are hashed with scrypt; sessions are HttpOnly cookies.
+Express backend (`server/`) with MongoDB or SQLite for accounts and SQLite FTS5 for the law index (prebuilt by `scripts/build-index.mjs`), plus a dependency-free vanilla JS front end (`public/`). Passwords are hashed with scrypt; sessions are HttpOnly cookies.

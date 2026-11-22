@@ -24,8 +24,7 @@ function parseCookies(header = '') {
 
 function setSessionCookie(req, res, token, maxAgeSec) {
   const https = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  // Over HTTPS the cookie is also allowed when the site is embedded in an iframe (e.g. a Hugging Face Space page).
-  const attrs = https ? 'SameSite=None; Secure; Partitioned' : 'SameSite=Lax';
+  const attrs = https ? 'SameSite=Lax; Secure' : 'SameSite=Lax';
   res.setHeader('Set-Cookie', `${COOKIE}=${token}; Path=/; HttpOnly; ${attrs}; Max-Age=${maxAgeSec}`);
 }
 

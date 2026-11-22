@@ -17,7 +17,7 @@ useStore(store);
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 const app = express();
-// Behind a hosting proxy (Hugging Face, Render…) set TRUST_PROXY=1 so per-IP limits see the real client IP.
+// Behind a hosting proxy (Render…) set TRUST_PROXY=1 so per-IP limits see the real client IP.
 const trust = process.env.TRUST_PROXY;
 app.set('trust proxy', trust ? (/^\d+$/.test(trust) ? Number(trust) : trust === 'true' || trust) : 'loopback');
 app.use(express.json({ limit: '2mb' }));
@@ -116,8 +116,10 @@ app.use((err, req, res, next) => {
 const PORT = Number(process.env.PORT) || 3000;
 app.listen(PORT, () => {
   console.log(`LawLens running at http://localhost:${PORT} (accounts: ${store.kind})`);
-  // Build the US Code index in the background so federal search doesn't depend on GovInfo's demo key.
-  ensureLoaded('federal')
-    .then((ok) => ok && console.log('[corpus] US Code index ready'))
-    .catch((err) => console.error('[corpus] federal:', err.message));
+  // Fetch the most-used indexes in the background (US Code + California by default) so the first search is instant.
+  for (const juris of (process.env.PRELOAD ?? 'federal,ca').split(',').map((j) => j.trim().toLowerCase()).filter(Boolean)) {
+    ensureLoaded(juris)
+      .then((ok) => ok && console.log(`[corpus] ${juris} index ready`))
+      .catch((err) => console.error(`[corpus] ${juris}:`, err.message));
+  }
 });

@@ -1,0 +1,68 @@
+# Builds the law search index (one SQLite FTS5 file per jurisdiction) from the Open US Law corpus and
+# publishes it as the "index" release. The server downloads these files instead of indexing on its own
+# small CPU. Runs weekly and only rebuilds when Open US Law publishes a new snapshot.
+name: Build law search index
+
+on:
+  schedule:
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      juris:
+        description: 'Only these jurisdictions, space-separated (e.g. "ca federal"); empty = all'
+        required: false
+      force:
+        description: 'Rebuild even if the published index is already on the current snapshot'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OUT: dist/index
+      JURIS: ${{ inputs.juris }}
+      FORCE: ${{ inputs.force }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --omit=dev
+
+      - name: Compare snapshot versions
+        id: check
+        run: |
+          if ! [[ "$JURIS" =~ ^[a-z\ ]*$ ]]; then echo "juris must be lowercase codes like: ca federal"; exit 1; fi
+          mkdir -p "$OUT"
+          latest=$(curl -fsSL https://oss-data-us.vaquill.ai/index.json | jq -r .version)
+          gh release download index -p index.json -D "$OUT" 2>/dev/null || true
+          published=$(jq -r '.version // ""' "$OUT/index.json" 2>/dev/null || true)
+          echo "Open US Law $latest, published index ${published:-none}"
+          if [ "$latest" = "$published" ] && [ "$FORCE" != "true" ] && [ -z "$JURIS" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        if: steps.check.outputs.build == 'true'
+        run: node --disable-warning=ExperimentalWarning scripts/build-index.mjs "$OUT" $JURIS
+
+      - name: Publish release assets
+        if: steps.check.outputs.build == 'true'
+        run: |
+          gh release view index >/dev/null 2>&1 || gh release create index --latest=false --title "Law search index" \
+            --notes "Prebuilt SQLite search indexes of the Open US Law corpus (CC BY-NC 4.0, https://github.com/Vaquill-AI/open-us-law), downloaded by the LawLens server. Rebuilt by the Build law search index workflow."
+          shopt -s nullglob
+          for f in "$OUT"/*.db.gz; do gh release upload index "$f" --clobber; done
+          # The manifest goes last, so servers never see it list a file that isn't uploaded yet.
+          gh release upload index "$OUT/index.json" --clobber

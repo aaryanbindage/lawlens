@@ -1,4 +1,4 @@
-// Runs in a worker thread: downloads one Open US Law parquet file and indexes it into corpus.db,
+// Runs in a worker thread: downloads one Open US Law parquet file and indexes it into that jurisdiction's search database,
 // so the long decode + FTS build never blocks the web server.
 import { parentPort, workerData } from 'node:worker_threads';
 import { DatabaseSync } from 'node:sqlite';
