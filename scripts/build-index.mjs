@@ -26,15 +26,29 @@ const list = only.length ? only : all;
 // Rebuilding a few jurisdictions keeps the others listed in an existing index.json of the same snapshot.
 const prev = existsSync(join(out, 'index.json')) ? JSON.parse(readFileSync(join(out, 'index.json'), 'utf8')) : null;
 const files = only.length && prev?.version === version ? prev.files : {};
+const failed = [];
 
 for (const j of list) {
+  try {
+    await build(j);
+  } catch (err) {
+    // One bad file shouldn't block the rest; servers index a missing jurisdiction themselves.
+    failed.push(j);
+    closeJuris(j);
+    rmSync(jurisFile(j), { force: true });
+    console.log(`::warning::${j} failed: ${err.message}`);
+  }
+}
+
+async function build(j) {
   const t0 = Date.now();
   if (!(await ensureLoaded(j))) {
     console.log(`${j}: no data in ${version}, skipped`);
-    continue;
+    return;
   }
   closeJuris(j);
   const db = new DatabaseSync(jurisFile(j));
+  db.exec('PRAGMA busy_timeout = 30000');
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('prebuilt', ?)").run(version);
   db.exec("INSERT INTO sections_fts (sections_fts) VALUES ('optimize'); PRAGMA journal_mode = DELETE; VACUUM;");
   const sections = db.prepare('SELECT count(*) AS n FROM sections').get().n;
@@ -48,5 +62,5 @@ for (const j of list) {
 
 rmSync(work, { recursive: true, force: true });
 writeFileSync(join(out, 'index.json'), JSON.stringify({ version, built_at: new Date().toISOString(), files }, null, 2));
-console.log(`wrote ${Object.keys(files).length} indexes for ${version} to ${out}`);
+console.log(`wrote ${Object.keys(files).length} indexes for ${version} to ${out}${failed.length ? `; failed: ${failed.join(' ')}` : ''}`);
 process.exit(0); // the manifest fetch keeps no handles, but worker threads may linger briefly

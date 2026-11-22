@@ -101,8 +101,8 @@ export function loadStatus(juris) {
   return job ? { loading: true, progress: job.progress, message: job.message } : { loading: false };
 }
 
-// Downloads the prebuilt index. Returns true when installed, false when the corpus has nothing for this
-// jurisdiction, or null when no prebuilt index can be fetched (the caller then indexes locally).
+// Downloads the prebuilt index. Returns true when installed, or null when no prebuilt index can be fetched
+// (the caller then indexes locally, which also finds out whether the corpus has this jurisdiction at all).
 async function fetchPrebuilt(juris, job) {
   let entry;
   try {
@@ -111,7 +111,7 @@ async function fetchPrebuilt(juris, job) {
     console.warn(`[corpus] prebuilt index unavailable (${err.message}); indexing ${juris} locally`);
     return null;
   }
-  if (!entry) return false;
+  if (!entry) return null;
   const tmp = `${jurisFile(juris)}.download`;
   try {
     job.message = `Downloading the ${juris === 'federal' ? 'US Code' : juris.toUpperCase()} search index (${Math.round(entry.bytes / 1e6)} MB)`;
@@ -144,14 +144,16 @@ function indexFile(juris, f, job) {
   const run = () =>
     new Promise((resolve, reject) => {
       const worker = new Worker(new URL('./corpus-worker.js', import.meta.url), { workerData: { dbPath: jurisFile(juris), juris, file: f } });
+      let rows;
       worker.on('message', (m) => {
         if (m.type === 'progress') {
           job.progress = (job.done + m.progress) / job.total;
           job.message = m.message;
-        } else if (m.type === 'done') resolve(m.rows);
+        } else if (m.type === 'done') rows = m.rows;
       });
       worker.on('error', reject);
-      worker.on('exit', (code) => code !== 0 && reject(new Error(`Indexing ${f.file} failed (exit ${code})`)));
+      // Settle on exit, not on 'done': the worker still holds its database connection until it exits.
+      worker.on('exit', (code) => (code === 0 && rows !== undefined ? resolve(rows) : reject(new Error(`Indexing ${f.file} failed (exit ${code})`))));
     });
   job.message = `Waiting for another code to finish indexing`;
   const result = queue.then(run, run);
